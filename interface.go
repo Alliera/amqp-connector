@@ -58,6 +58,13 @@ func (conn *Connection) Channel(ctx context.Context) (*Channel, error) {
 	return channel, err
 }
 
+func (conn *Connection) CloseConnection() error {
+	if conn != nil && conn.Connection != nil {
+		return conn.Connection.Close()
+	}
+	return nil
+}
+
 func (ch *Channel) Consume(ctx context.Context, queue string, consumer string, autoAck bool, exclusive bool, noLocal bool, noWait bool, args amqp.Table) <-chan amqp.Delivery {
 	deliveries := make(chan amqp.Delivery)
 	ch.activeConsumers.Store(consumer, true)
