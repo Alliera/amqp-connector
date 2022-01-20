@@ -29,7 +29,7 @@ func (conn *Connection) establishConnection(ctx context.Context) error {
 	}
 }
 
-func (conn *Connection) establishChannel(ctx context.Context, channel *Channel) error {
+func (conn *Connection) establishChannel(ctx context.Context, channel *Channel, prefetchCount int) error {
 	for {
 		select {
 		case <-ctx.Done():
@@ -38,12 +38,17 @@ func (conn *Connection) establishChannel(ctx context.Context, channel *Channel) 
 			ch, err := conn.Connection.Channel()
 			if err == nil {
 				channel.Channel = ch
-				err = ch.Qos(conn.qosPrefetchCount, 0, false)
-				if err == nil {
+				var qosErr error
+				if prefetchCount != UnlimitedPrefetchCount {
+					qosErr = ch.Qos(prefetchCount, 0, false)
+					if qosErr != nil {
+						logger.Error("Failed to set QoS")
+					}
+				}
+				if qosErr == nil {
 					logger.Debug("Channel successfully established")
 					return nil
 				}
-				logger.Error("Failed to set QoS")
 			}
 			logger.Error(fmt.Sprintf("Failed to establish channel: %v", err))
 			conn.delay()

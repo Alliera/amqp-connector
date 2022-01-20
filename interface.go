@@ -9,6 +9,8 @@ import (
 	"time"
 )
 
+const UnlimitedPrefetchCount = -1
+
 type Connection struct {
 	*amqp.Connection
 	reconnectionDelaySec int
@@ -22,8 +24,8 @@ type Channel struct {
 	closed          int32
 }
 
-func Dial(ctx context.Context, addr string, reconnectionDelaySec int, qosPrefetchCount int) (*Connection, error) {
-	connection := &Connection{addr: addr, reconnectionDelaySec: reconnectionDelaySec, qosPrefetchCount: qosPrefetchCount}
+func Dial(ctx context.Context, addr string, reconnectionDelaySec int) (*Connection, error) {
+	connection := &Connection{addr: addr, reconnectionDelaySec: reconnectionDelaySec}
 	err := connection.establishConnection(ctx)
 	if err == nil {
 		go func() {
@@ -40,9 +42,9 @@ func Dial(ctx context.Context, addr string, reconnectionDelaySec int, qosPrefetc
 	return connection, err
 }
 
-func (conn *Connection) Channel(ctx context.Context) (*Channel, error) {
+func (conn *Connection) Channel(ctx context.Context, prefetchCount int) (*Channel, error) {
 	channel := &Channel{}
-	err := conn.establishChannel(ctx, channel)
+	err := conn.establishChannel(ctx, channel, prefetchCount)
 	if err == nil {
 		go func() {
 			for {
@@ -51,7 +53,7 @@ func (conn *Connection) Channel(ctx context.Context) (*Channel, error) {
 					break
 				}
 				logger.Error(fmt.Sprintf("Pool lost channel by reason: %v\n", reason))
-				_ = conn.establishChannel(ctx, channel)
+				_ = conn.establishChannel(ctx, channel, prefetchCount)
 			}
 		}()
 	}
