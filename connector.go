@@ -9,7 +9,7 @@ import (
 import "github.com/streadway/amqp"
 import "github.com/Alliera/logging"
 
-var logger = logging.NewDefault("Consumer")
+var logger = logging.NewDefault("RabbitMQ Connector").UnsetFlags(logging.ShortCaller)
 
 func (conn *Connection) establishConnection(ctx context.Context) error {
 	for {
