@@ -2,6 +2,7 @@ package amqp_connector
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync/atomic"
 	"time"
@@ -15,7 +16,7 @@ func (conn *Connection) establishConnection(ctx context.Context) error {
 	for {
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return logging.Trace(ctx.Err())
 		default:
 			connection, err := amqp.Dial(conn.addr)
 			if err == nil {
@@ -23,7 +24,7 @@ func (conn *Connection) establishConnection(ctx context.Context) error {
 				conn.Connection = connection
 				return nil
 			}
-			logger.Error(fmt.Sprintf("Failed to establish connection: %v", err))
+			logger.LogError(logging.Trace(fmt.Errorf("failed to establish connection: %v", err)))
 			conn.delay()
 		}
 	}
@@ -33,7 +34,7 @@ func (conn *Connection) establishChannel(ctx context.Context, channel *Channel, 
 	for {
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return logging.Trace(ctx.Err())
 		default:
 			ch, err := conn.Connection.Channel()
 			if err == nil {
@@ -42,7 +43,7 @@ func (conn *Connection) establishChannel(ctx context.Context, channel *Channel, 
 				if prefetchCount != UnlimitedPrefetchCount {
 					qosErr = ch.Qos(prefetchCount, 0, false)
 					if qosErr != nil {
-						logger.Error("Failed to set QoS")
+						logger.LogError(logging.Trace(errors.New("failed to set QoS")))
 					}
 				}
 				if qosErr == nil {
@@ -50,7 +51,7 @@ func (conn *Connection) establishChannel(ctx context.Context, channel *Channel, 
 					return nil
 				}
 			}
-			logger.Error(fmt.Sprintf("Failed to establish channel: %v", err))
+			logger.LogError(logging.Trace(fmt.Errorf("failed to establish channel: %v", err)))
 			conn.delay()
 		}
 	}
