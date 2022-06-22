@@ -35,7 +35,10 @@ func Dial(ctx context.Context, addr string, reconnectionDelaySec int) (*Connecti
 				if !ok {
 					break
 				}
-				logger.LogError(logging.Trace(fmt.Errorf("pool lost connection by reason: %v\n", reason)))
+				if reason.Recover {
+					continue
+				}
+				logger.LogError(logging.Trace(fmt.Errorf("pool lost connection by reason: %v", reason)))
 				_ = connection.establishConnection(ctx)
 			}
 		}()
@@ -53,7 +56,10 @@ func (conn *Connection) Channel(ctx context.Context, prefetchCount int) (*Channe
 				if !ok {
 					break
 				}
-				logger.LogError(logging.Trace(fmt.Errorf("pool lost channel by reason: %v\n", reason)))
+				if reason.Recover {
+					continue
+				}
+				logger.LogError(logging.Trace(fmt.Errorf("pool lost channel by reason: %v", reason)))
 				_ = conn.establishChannel(ctx, channel, prefetchCount)
 			}
 		}()
