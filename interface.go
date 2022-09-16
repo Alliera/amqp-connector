@@ -33,9 +33,11 @@ func Dial(ctx context.Context, addr string, reconnectionDelaySec int) (*Connecti
 			for {
 				reason, ok := <-connection.NotifyClose(make(chan *amqp.Error))
 				if !ok {
+					logger.Debug(fmt.Sprintf("Connection was manually closed for '%s'", addr))
 					break
 				}
-				if reason.Recover {
+				if reason != nil && reason.Recover {
+					logger.Debug(fmt.Sprintf("Reconnection for '%s' aborted! Connection was closed by recoverable reason: '%s'", addr, reason.Error()))
 					continue
 				}
 				logger.LogError(logging.Trace(fmt.Errorf("pool lost connection by reason: %v", reason)))
@@ -54,9 +56,11 @@ func (conn *Connection) Channel(ctx context.Context, prefetchCount int) (*Channe
 			for {
 				reason, ok := <-channel.NotifyClose(make(chan *amqp.Error))
 				if !ok {
+					logger.Debug(fmt.Sprintf("(Channel) connection was manually closed for '%s'", conn.addr))
 					break
 				}
-				if reason.Recover {
+				if reason != nil && reason.Recover {
+					logger.Debug(fmt.Sprintf("(Channel) reconnection for '%s' aborted! Connection was closed by recoverable reason: '%s'", conn.addr, reason.Error()))
 					continue
 				}
 				logger.LogError(logging.Trace(fmt.Errorf("pool lost channel by reason: %v", reason)))
@@ -86,11 +90,12 @@ func (ch *Channel) Consume(ctx context.Context, queue string, consumer string, a
 			default:
 				d, err := ch.Channel.Consume(queue, consumer, autoAck, exclusive, noLocal, noWait, args)
 				if ch.isCanceled(consumer) || ch.isClosed() {
+					logger.Debug(fmt.Sprintf("Consuming for '%s' queue was manually closed", queue))
 					close(deliveries)
 					return
 				}
 				if err != nil {
-					logger.LogError(logging.Trace(fmt.Errorf("failed to consume from '%s' queue: %v", queue, err)))
+					logger.LogError(logging.Trace(fmt.Errorf("failed to consume from '%s' queue: %v, retry after 4 sec", queue, err)))
 					time.Sleep(4 * time.Second)
 					continue
 				}

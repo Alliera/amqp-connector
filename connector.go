@@ -24,7 +24,7 @@ func (conn *Connection) establishConnection(ctx context.Context) error {
 				conn.Connection = connection
 				return nil
 			}
-			logger.LogError(logging.Trace(fmt.Errorf("failed to establish connection: %v", err)))
+			logger.LogError(logging.Trace(fmt.Errorf("failed to establish connection: %v, retry after %d sec", err, conn.reconnectionDelaySec)))
 			conn.delay()
 		}
 	}
@@ -51,7 +51,7 @@ func (conn *Connection) establishChannel(ctx context.Context, channel *Channel, 
 					return nil
 				}
 			}
-			logger.LogError(logging.Trace(fmt.Errorf("failed to establish channel: %v", err)))
+			logger.LogError(logging.Trace(fmt.Errorf("failed to establish channel: %v, retry after %d sec", err, conn.reconnectionDelaySec)))
 			conn.delay()
 		}
 	}
