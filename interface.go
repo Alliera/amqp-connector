@@ -13,6 +13,7 @@ import (
 const UnlimitedPrefetchCount = -1
 
 type Connection struct {
+	Interrupted chan bool
 	*amqp.Connection
 	reconnectionDelaySec int
 	qosPrefetchCount     int
@@ -20,28 +21,34 @@ type Connection struct {
 }
 
 type Channel struct {
+	Connection *Connection
 	*amqp.Channel
 	activeConsumers sync.Map
 	closed          int32
 }
 
 func Dial(ctx context.Context, addr string, reconnectionDelaySec int) (*Connection, error) {
-	connection := &Connection{addr: addr, reconnectionDelaySec: reconnectionDelaySec}
+	connection := &Connection{addr: addr, reconnectionDelaySec: reconnectionDelaySec, Interrupted: make(chan bool)}
 	err := connection.establishConnection(ctx)
 	if err == nil {
 		go func() {
 			for {
-				reason, ok := <-connection.NotifyClose(make(chan *amqp.Error))
-				if !ok {
-					logger.Debug(fmt.Sprintf("Connection was manually closed for '%s'", addr))
-					break
+				select {
+				case reason, ok := <-connection.NotifyClose(make(chan *amqp.Error)):
+					if !ok {
+						logger.Debug(fmt.Sprintf("Connection was manually closed for '%s'", addr))
+						break
+					}
+					if reason != nil && reason.Recover {
+						logger.Debug(fmt.Sprintf("Reconnection for '%s' aborted! Connection was closed by recoverable reason: '%s'", addr, reason.Error()))
+						continue
+					}
+					logger.LogError(logging.Trace(fmt.Errorf("pool lost connection by reason: %v", reason)))
+					_ = connection.establishConnection(ctx)
+				case <-connection.Interrupted:
+					logger.LogError(logging.Trace(fmt.Errorf("try to recover connection (NotifyClose was lost)")))
+					_ = connection.establishConnection(ctx)
 				}
-				if reason != nil && reason.Recover {
-					logger.Debug(fmt.Sprintf("Reconnection for '%s' aborted! Connection was closed by recoverable reason: '%s'", addr, reason.Error()))
-					continue
-				}
-				logger.LogError(logging.Trace(fmt.Errorf("pool lost connection by reason: %v", reason)))
-				_ = connection.establishConnection(ctx)
 			}
 		}()
 	}
@@ -49,22 +56,27 @@ func Dial(ctx context.Context, addr string, reconnectionDelaySec int) (*Connecti
 }
 
 func (conn *Connection) Channel(ctx context.Context, prefetchCount int) (*Channel, error) {
-	channel := &Channel{}
+	channel := &Channel{Connection: conn}
 	err := conn.establishChannel(ctx, channel, prefetchCount)
 	if err == nil {
 		go func() {
 			for {
-				reason, ok := <-channel.NotifyClose(make(chan *amqp.Error))
-				if !ok {
-					logger.Debug(fmt.Sprintf("(Channel) connection was manually closed for '%s'", conn.addr))
-					break
+				select {
+				case reason, ok := <-channel.NotifyClose(make(chan *amqp.Error)):
+					if !ok {
+						logger.Debug(fmt.Sprintf("(Channel) connection was manually closed for '%s'", conn.addr))
+						break
+					}
+					if reason != nil && reason.Recover {
+						logger.Debug(fmt.Sprintf("(Channel) reconnection for '%s' aborted! Connection was closed by recoverable reason: '%s'", conn.addr, reason.Error()))
+						continue
+					}
+					logger.LogError(logging.Trace(fmt.Errorf("pool lost channel by reason: %v", reason)))
+					_ = conn.establishChannel(ctx, channel, prefetchCount)
+				case <-conn.Interrupted:
+					logger.LogError(logging.Trace(fmt.Errorf("try to recover channel (NotifyClose was lost)")))
+					_ = conn.establishChannel(ctx, channel, prefetchCount)
 				}
-				if reason != nil && reason.Recover {
-					logger.Debug(fmt.Sprintf("(Channel) reconnection for '%s' aborted! Connection was closed by recoverable reason: '%s'", conn.addr, reason.Error()))
-					continue
-				}
-				logger.LogError(logging.Trace(fmt.Errorf("pool lost channel by reason: %v", reason)))
-				_ = conn.establishChannel(ctx, channel, prefetchCount)
 			}
 		}()
 	}
@@ -96,6 +108,8 @@ func (ch *Channel) Consume(ctx context.Context, queue string, consumer string, a
 				}
 				if err != nil {
 					logger.LogError(logging.Trace(fmt.Errorf("failed to consume from '%s' queue: %v, retry after 4 sec", queue, err)))
+					close(ch.Connection.Interrupted)
+					ch.Connection.Interrupted = make(chan bool)
 					time.Sleep(4 * time.Second)
 					continue
 				}
