@@ -36,11 +36,11 @@ func Dial(ctx context.Context, addr string, reconnectionDelaySec int) (*Connecti
 				select {
 				case reason, ok := <-connection.NotifyClose(make(chan *amqp.Error)):
 					if !ok {
-						logger.Debug(fmt.Sprintf("Connection was manually closed for '%s'", addr))
-						break
+						logger.Warning(fmt.Sprintf("Connection was manually closed for '%s'", addr))
+						return
 					}
 					if reason != nil && reason.Recover {
-						logger.Debug(fmt.Sprintf("Reconnection for '%s' aborted! Connection was closed by recoverable reason: '%s'", addr, reason.Error()))
+						logger.Warning(fmt.Sprintf("Reconnection for '%s' aborted! Connection was closed by recoverable reason: '%s'", addr, reason.Error()))
 						continue
 					}
 					logger.LogError(logging.Trace(fmt.Errorf("pool lost connection by reason: %v", reason)))
@@ -64,11 +64,11 @@ func (conn *Connection) Channel(ctx context.Context, prefetchCount int) (*Channe
 				select {
 				case reason, ok := <-channel.NotifyClose(make(chan *amqp.Error)):
 					if !ok {
-						logger.Debug(fmt.Sprintf("(Channel) connection was manually closed for '%s'", conn.addr))
-						break
+						logger.Warning(fmt.Sprintf("(Channel) connection was manually closed for '%s'", conn.addr))
+						return
 					}
 					if reason != nil && reason.Recover {
-						logger.Debug(fmt.Sprintf("(Channel) reconnection for '%s' aborted! Connection was closed by recoverable reason: '%s'", conn.addr, reason.Error()))
+						logger.Warning(fmt.Sprintf("(Channel) reconnection for '%s' aborted! Connection was closed by recoverable reason: '%s'", conn.addr, reason.Error()))
 						continue
 					}
 					logger.LogError(logging.Trace(fmt.Errorf("pool lost channel by reason: %v", reason)))
