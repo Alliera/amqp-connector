@@ -13,7 +13,6 @@ import (
 const UnlimitedPrefetchCount = -1
 
 type Connection struct {
-	Interrupted chan bool
 	*amqp.Connection
 	reconnectionDelaySec int
 	qosPrefetchCount     int
@@ -28,25 +27,25 @@ type Channel struct {
 }
 
 func Dial(ctx context.Context, addr string, reconnectionDelaySec int) (*Connection, error) {
-	connection := &Connection{addr: addr, reconnectionDelaySec: reconnectionDelaySec, Interrupted: make(chan bool)}
+	connection := &Connection{addr: addr, reconnectionDelaySec: reconnectionDelaySec}
 	err := connection.establishConnection(ctx)
 	if err == nil {
 		go func() {
 			for {
 				select {
-				case reason, ok := <-connection.NotifyClose(make(chan *amqp.Error)):
-					if !ok {
-						logger.Warning(fmt.Sprintf("Connection was manually closed for '%s'", addr))
-						return
-					}
+				case <-ctx.Done():
+					logger.Warning("Graceful shutdown. Exited from reconnection loop")
+					return
+				case reason := <-connection.NotifyClose(make(chan *amqp.Error)):
 					if reason != nil && reason.Recover {
-						logger.Warning(fmt.Sprintf("Reconnection for '%s' aborted! Connection was closed by recoverable reason: '%s'", addr, reason.Error()))
+						logger.Warning(fmt.Sprintf("Connection was closed by recoverable reason: '%s' -- '%s'", addr, reason.Error()))
 						continue
 					}
-					logger.LogError(logging.Trace(fmt.Errorf("pool lost connection by reason: %v", reason)))
-					_ = connection.establishConnection(ctx)
-				case <-connection.Interrupted:
-					logger.LogError(logging.Trace(fmt.Errorf("try to recover connection (NotifyClose was lost)")))
+					reasonMsg := ""
+					if reason != nil {
+						reasonMsg = reason.Reason
+					}
+					logger.LogError(logging.Trace(fmt.Errorf("pool lost connection by reason: %s. Do reconnection", reasonMsg)))
 					_ = connection.establishConnection(ctx)
 				}
 			}
@@ -62,19 +61,19 @@ func (conn *Connection) Channel(ctx context.Context, prefetchCount int) (*Channe
 		go func() {
 			for {
 				select {
-				case reason, ok := <-channel.NotifyClose(make(chan *amqp.Error)):
-					if !ok {
-						logger.Warning(fmt.Sprintf("(Channel) connection was manually closed for '%s'", conn.addr))
-						return
-					}
+				case <-ctx.Done():
+					logger.Warning("Graceful shutdown. Exited from reconnection loop")
+					return
+				case reason := <-channel.NotifyClose(make(chan *amqp.Error)):
 					if reason != nil && reason.Recover {
-						logger.Warning(fmt.Sprintf("(Channel) reconnection for '%s' aborted! Connection was closed by recoverable reason: '%s'", conn.addr, reason.Error()))
+						logger.Warning(fmt.Sprintf("Connection was closed by recoverable reason: '%s' -- '%s'", conn.addr, reason.Error()))
 						continue
 					}
-					logger.LogError(logging.Trace(fmt.Errorf("pool lost channel by reason: %v", reason)))
-					_ = conn.establishChannel(ctx, channel, prefetchCount)
-				case <-conn.Interrupted:
-					logger.LogError(logging.Trace(fmt.Errorf("try to recover channel (NotifyClose was lost)")))
+					reasonMsg := ""
+					if reason != nil {
+						reasonMsg = reason.Reason
+					}
+					logger.LogError(logging.Trace(fmt.Errorf("pool lost channel by reason: %v. Do reconnection", reasonMsg)))
 					_ = conn.establishChannel(ctx, channel, prefetchCount)
 				}
 			}
@@ -108,8 +107,6 @@ func (ch *Channel) Consume(ctx context.Context, queue string, consumer string, a
 				}
 				if err != nil {
 					logger.LogError(logging.Trace(fmt.Errorf("failed to consume from '%s' queue: %v, retry after 4 sec", queue, err)))
-					close(ch.Connection.Interrupted)
-					ch.Connection.Interrupted = make(chan bool)
 					time.Sleep(4 * time.Second)
 					continue
 				}
