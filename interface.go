@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"github.com/Alliera/logging"
-	"github.com/streadway/amqp"
+	amqp "github.com/rabbitmq/amqp091-go"
 	"sync"
 	"sync/atomic"
 	"time"
